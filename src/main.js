@@ -5,6 +5,7 @@ import {
   startARSession, endARSession, getSession, getRefSpace,
   onXRFrame, hitTestAtPoint, measureBBox,
   getCenterHitTest, dist3D, formatDistance, isARSupported,
+  projectToScreen,
 } from './ar.js';
 import * as log from './log.js';
 
@@ -247,6 +248,9 @@ function updateSurface(detected) {
 
 // ══════════════════════════════════════════════════
 //  Mode 1: Manual (fallback)
+//  Points are stored as 3D world positions only.
+//  Every XR frame, they're re-projected to screen coords
+//  so they stick to their real-world location.
 // ══════════════════════════════════════════════════
 function resetManual() {
   pt1 = pt2 = null; manualLen = null;
@@ -261,25 +265,43 @@ function clearCanvas() {
   $pCtx.clearRect(0, 0, $pCanvas.width, $pCanvas.height);
 }
 
+/**
+ * Draw manual measurement overlay.
+ * Called every XR frame — re-projects 3D points to current screen position.
+ */
 function drawManual() {
   clearCanvas();
   const ctx = $pCtx;
-  const dot = p => {
-    ctx.beginPath(); ctx.arc(p.sx, p.sy, 14, 0, Math.PI * 2);
+
+  // Re-project world points to current screen coords
+  const s1 = pt1 ? projectToScreen(pt1, currentFrame, currentRefSpace) : null;
+  const s2 = pt2 ? projectToScreen(pt2, currentFrame, currentRefSpace) : null;
+
+  const drawDot = (s) => {
+    if (!s) return;
+    // Outer glow
+    ctx.beginPath(); ctx.arc(s.x, s.y, 14, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fill();
-    ctx.beginPath(); ctx.arc(p.sx, p.sy, 7, 0, Math.PI * 2);
+    // White ring
+    ctx.beginPath(); ctx.arc(s.x, s.y, 7, 0, Math.PI * 2);
     ctx.fillStyle = '#fff'; ctx.fill();
-    ctx.beginPath(); ctx.arc(p.sx, p.sy, 3.5, 0, Math.PI * 2);
+    // Green center
+    ctx.beginPath(); ctx.arc(s.x, s.y, 3.5, 0, Math.PI * 2);
     ctx.fillStyle = '#00e5a0'; ctx.fill();
   };
-  if (pt1) dot(pt1);
-  if (pt2) dot(pt2);
-  if (pt1 && pt2) {
-    ctx.beginPath(); ctx.moveTo(pt1.sx, pt1.sy); ctx.lineTo(pt2.sx, pt2.sy);
+
+  if (s1) drawDot(s1);
+  if (s2) drawDot(s2);
+
+  if (s1 && s2) {
+    // Dashed line between points
+    ctx.beginPath(); ctx.moveTo(s1.x, s1.y); ctx.lineTo(s2.x, s2.y);
     ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2;
     ctx.setLineDash([8, 4]); ctx.stroke(); ctx.setLineDash([]);
+
+    // Measurement pill at midpoint
     if (manualLen !== null) {
-      const mx = (pt1.sx + pt2.sx) / 2, my = (pt1.sy + pt2.sy) / 2;
+      const mx = (s1.x + s2.x) / 2, my = (s1.y + s2.y) / 2;
       const t = formatDistance(manualLen);
       ctx.font = '700 18px -apple-system, sans-serif';
       const tw = ctx.measureText(t).width + 24, th = 34;
@@ -298,24 +320,19 @@ $('btnPlacePoint').addEventListener('click', async () => {
   if (currentMode !== 'manual' || !arActive) return;
   if (!surfaceDetected) { toast('No surface — move device', true); return; }
 
-  const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
-  const nx = 0.5, ny = 0.5; // center of screen
-
   if (!pt1) {
-    const w = await hitTestAtPoint(currentFrame, currentRefSpace, nx, ny);
+    const w = await hitTestAtPoint(currentFrame, currentRefSpace, 0.5, 0.5);
     if (!w) { toast('Hit-test failed', true); return; }
-    pt1 = { sx: cx, sy: cy, w };
-    $manInstr.textContent = 'Move to second point · Tap +';
+    pt1 = w; // store only the 3D world position {x,y,z}
+    $manInstr.textContent = 'Move to second point · Press +';
     $surfLbl.textContent = '';
-    drawManual();
   } else if (!pt2) {
-    const w = await hitTestAtPoint(currentFrame, currentRefSpace, nx, ny);
+    const w = await hitTestAtPoint(currentFrame, currentRefSpace, 0.5, 0.5);
     if (!w) { toast('Hit-test failed', true); return; }
-    pt2 = { sx: cx, sy: cy, w };
-    manualLen = dist3D(pt1.w, pt2.w);
+    pt2 = w; // store only the 3D world position {x,y,z}
+    manualLen = dist3D(pt1, pt2);
     $manInstr.textContent = formatDistance(manualLen);
     $manActs.style.display = 'flex';
-    drawManual();
   }
 });
 
@@ -617,10 +634,13 @@ function xrLoop(ts, frame) {
   // Surface detection
   updateSurface(getCenterHitTest(frame, ref) !== null);
 
-  // Draw bounding boxes from last YOLO run
-  if (currentMode === 'auto' && cameraVideo && lastDets.length > 0) {
+  // Draw based on mode
+  if (currentMode === 'manual' && (pt1 || pt2)) {
+    // Re-project 3D points to screen every frame — points stick to surface
+    drawManual();
+  } else if (currentMode === 'auto' && cameraVideo && lastDets.length > 0) {
     drawAuto(lastDets, cameraVideo.videoWidth, cameraVideo.videoHeight);
-  } else if (currentMode === 'auto') {
+  } else {
     clearCanvas();
   }
 }

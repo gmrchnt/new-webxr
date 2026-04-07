@@ -126,6 +126,43 @@ export function formatDistance(m) {
   return `${m.toFixed(2)} m`;
 }
 
+/**
+ * Project a 3D world point to 2D screen coordinates.
+ * Returns { x, y } in CSS pixels, or null if behind camera.
+ */
+export function projectToScreen(worldPt, frame, refSpace) {
+  if (!frame || !refSpace) return null;
+  const pose = frame.getViewerPose(refSpace);
+  if (!pose || !pose.views.length) return null;
+
+  const view = pose.views[0];
+  const pMat = view.projectionMatrix;      // Float32Array[16], column-major
+  const vMat = view.transform.inverse.matrix; // Float32Array[16], column-major
+
+  // Transform world point by view matrix
+  const wx = worldPt.x, wy = worldPt.y, wz = worldPt.z;
+  const vx = vMat[0]*wx + vMat[4]*wy + vMat[8]*wz  + vMat[12];
+  const vy = vMat[1]*wx + vMat[5]*wy + vMat[9]*wz  + vMat[13];
+  const vz = vMat[2]*wx + vMat[6]*wy + vMat[10]*wz + vMat[14];
+  const vw = vMat[3]*wx + vMat[7]*wy + vMat[11]*wz + vMat[15];
+
+  // Apply projection
+  const cx = pMat[0]*vx + pMat[4]*vy + pMat[8]*vz  + pMat[12]*vw;
+  const cy = pMat[1]*vx + pMat[5]*vy + pMat[9]*vz  + pMat[13]*vw;
+  const cw = pMat[3]*vx + pMat[7]*vy + pMat[11]*vz + pMat[15]*vw;
+
+  // Behind camera
+  if (cw <= 0) return null;
+
+  // NDC to screen
+  const ndcX = cx / cw;
+  const ndcY = cy / cw;
+  const screenX = (ndcX *  0.5 + 0.5) * window.innerWidth;
+  const screenY = (ndcY * -0.5 + 0.5) * window.innerHeight;
+
+  return { x: screenX, y: screenY };
+}
+
 function vec(p) { return { x: p.x, y: p.y, z: p.z }; }
 
 export async function endARSession() {
