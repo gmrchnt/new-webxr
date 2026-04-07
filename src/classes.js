@@ -6,17 +6,17 @@ export const CLASS_NAMES = [
   "scratch",
   "crack",
   "glass_shatter",
-  "tire_flat",
   "lamp_broken",
+  "tire_flat",
 ];
 
 export const BOX_COLORS = [
-  "#00e5a0",
-  "#ff4757",
-  "#ffa502",
+  "#51ff00",
+  "#ff0015",
+  "#ffa600",
   "#3742fa",
-  "#ff6b81",
-  "#7bed9f",
+  "#00b6ad",
+  "#0c0c0c",
 ];
 
 export function getColor(classId) {
