@@ -118,9 +118,8 @@ let frames = 0;
 let fpsTimes = [];
 
 // Persistent damage log
-let damageLog = [];    // { id, className, classId, confidence, timestamp }
+let damageLog = [];    // { id, className, classId, confidence, timestamp, bbox }
 let logNextId = 1;
-let loggedHashes = new Set(); // deduplicate
 
 // ══════════════════════════════════════════════════
 //  Model loading
@@ -239,26 +238,50 @@ async function loop() {
 // ══════════════════════════════════════════════════
 //  UI updates
 // ══════════════════════════════════════════════════
-function detHash(d) {
-  // Coarse hash — same class + roughly same region = same damage
-  const [x, y, w, h] = d.bbox;
-  return `${d.classId}_${Math.round(x/40)}_${Math.round(y/40)}_${Math.round(w/40)}_${Math.round(h/40)}`;
+function iou(a, b) {
+  // a, b are [x, y, w, h]
+  const ax1 = a[0], ay1 = a[1], ax2 = a[0] + a[2], ay2 = a[1] + a[3];
+  const bx1 = b[0], by1 = b[1], bx2 = b[0] + b[2], by2 = b[1] + b[3];
+  const ix1 = Math.max(ax1, bx1), iy1 = Math.max(ay1, by1);
+  const ix2 = Math.min(ax2, bx2), iy2 = Math.min(ay2, by2);
+  if (ix2 <= ix1 || iy2 <= iy1) return 0;
+  const inter = (ix2 - ix1) * (iy2 - iy1);
+  const union = a[2] * a[3] + b[2] * b[3] - inter;
+  return inter / (union + 1e-6);
 }
 
+const LOG_IOU_THRESH = 0.5; // overlap threshold to consider same damage
+
 function logDetections(dets) {
+  let changed = false;
   for (const d of dets) {
-    const h = detHash(d);
-    if (loggedHashes.has(h)) continue;
-    loggedHashes.add(h);
+    // Check if this detection overlaps strongly with any existing log entry of the same class
+    const isDuplicate = damageLog.some(entry =>
+      entry.classId === d.classId && iou(entry.bbox, d.bbox) > LOG_IOU_THRESH
+    );
+    if (isDuplicate) {
+      // Update confidence if higher (same damage seen with better confidence)
+      const match = damageLog.find(entry =>
+        entry.classId === d.classId && iou(entry.bbox, d.bbox) > LOG_IOU_THRESH
+      );
+      if (match && d.confidence > match.confidence) {
+        match.confidence = d.confidence;
+        changed = true;
+      }
+      continue;
+    }
+
     damageLog.push({
       id: logNextId++,
       className: d.className,
       classId: d.classId,
       confidence: d.confidence,
       timestamp: new Date().toLocaleTimeString(),
+      bbox: d.bbox,
     });
+    changed = true;
   }
-  renderLog();
+  if (changed) renderLog();
 }
 
 function renderLog() {
@@ -292,7 +315,6 @@ document.addEventListener('click', (e) => {
 $('btnClearLog').addEventListener('click', () => {
   damageLog = [];
   logNextId = 1;
-  loggedHashes.clear();
   renderLog();
 });
 
