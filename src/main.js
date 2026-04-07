@@ -1,12 +1,12 @@
-import './style.css';
-import { loadModel, detect, isModelLoaded } from './detector.js';
-import { drawDetections } from './renderer.js';
-import { getColor, CLASS_NAMES } from './classes.js';
+import "./style.css";
+import { loadModel, detect, isModelLoaded } from "./detector.js";
+import { drawDetections } from "./renderer.js";
+import { getColor, CLASS_NAMES } from "./classes.js";
 
 // ══════════════════════════════════════════════════
 //  DOM
 // ══════════════════════════════════════════════════
-document.getElementById('app').innerHTML = `
+document.getElementById("app").innerHTML = `
   <div class="loading-screen" id="loadingScreen">
     <div class="spinner"></div>
     <div class="loading-label" id="loadingLabel">Initializing…</div>
@@ -107,10 +107,10 @@ document.getElementById('app').innerHTML = `
 // ══════════════════════════════════════════════════
 //  State
 // ══════════════════════════════════════════════════
-const $ = id => document.getElementById(id);
-const $video   = $('video');
-const $overlay = $('overlay');
-const $ctx     = $overlay.getContext('2d');
+const $ = (id) => document.getElementById(id);
+const $video = $("video");
+const $overlay = $("overlay");
+const $ctx = $overlay.getContext("2d");
 let running = false;
 let rafId = null;
 let threshold = 0.4;
@@ -118,93 +118,97 @@ let frames = 0;
 let fpsTimes = [];
 
 // Persistent damage log
-let damageLog = [];    // { id, className, classId, confidence, timestamp, bbox }
+let damageLog = []; // { id, className, classId, confidence, timestamp, bbox }
 let logNextId = 1;
 
 // ══════════════════════════════════════════════════
 //  Model loading
 // ══════════════════════════════════════════════════
 (async () => {
-  $('loadingScreen').classList.remove('hidden');
-  $('loadingLabel').textContent = 'Loading YOLOv8n damage model…';
+  $("loadingScreen").classList.remove("hidden");
+  $("loadingLabel").textContent = "Loading YOLOv8n damage model…";
   try {
-    await loadModel('/best.onnx');
-    $('iStatus').textContent = 'Ready';
-    toast('Model loaded');
+    await loadModel("/best.onnx");
+    $("iStatus").textContent = "Ready";
+    toast("Model loaded");
   } catch (err) {
     console.error(err);
-    $('iStatus').textContent = 'Error';
-    toast('Model load failed: ' + err.message, true);
+    $("iStatus").textContent = "Error";
+    toast("Model load failed: " + err.message, true);
   }
-  $('loadingScreen').classList.add('hidden');
+  $("loadingScreen").classList.add("hidden");
 })();
 
 // ══════════════════════════════════════════════════
 //  Camera
 // ══════════════════════════════════════════════════
-$('btnStart').addEventListener('click', async () => {
+$("btnStart").addEventListener("click", async () => {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+      video: {
+        facingMode: "environment",
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
     });
     $video.srcObject = stream;
     await $video.play();
 
-    $overlay.width  = $video.videoWidth  || 640;
+    $overlay.width = $video.videoWidth || 640;
     $overlay.height = $video.videoHeight || 480;
 
-    $('placeholder').classList.add('hidden');
-    $('statusDot').classList.add('live');
-    $('statusLabel').textContent = 'Live';
-    $('btnStart').disabled = true;
-    $('btnStop').disabled  = false;
+    $("placeholder").classList.add("hidden");
+    $("statusDot").classList.add("live");
+    $("statusLabel").textContent = "Live";
+    $("btnStart").disabled = true;
+    $("btnStop").disabled = false;
 
     running = true;
     frames = 0;
     fpsTimes = [];
     loop();
   } catch (err) {
-    toast('Camera denied: ' + err.message, true);
+    toast("Camera denied: " + err.message, true);
   }
 });
 
-$('btnStop').addEventListener('click', () => {
+$("btnStop").addEventListener("click", () => {
   running = false;
   if (rafId) cancelAnimationFrame(rafId);
-  $video.srcObject?.getTracks().forEach(t => t.stop());
+  $video.srcObject?.getTracks().forEach((t) => t.stop());
   $video.srcObject = null;
   $ctx.clearRect(0, 0, $overlay.width, $overlay.height);
 
-  $('placeholder').classList.remove('hidden');
-  $('statusDot').classList.remove('live');
-  $('statusLabel').textContent = 'Offline';
-  $('btnStart').disabled = false;
-  $('btnStop').disabled  = true;
+  $("placeholder").classList.remove("hidden");
+  $("statusDot").classList.remove("live");
+  $("statusLabel").textContent = "Offline";
+  $("btnStart").disabled = false;
+  $("btnStop").disabled = true;
 });
 
 // ══════════════════════════════════════════════════
 //  Threshold
 // ══════════════════════════════════════════════════
-$('threshSlider').addEventListener('input', (e) => {
+$("threshSlider").addEventListener("input", (e) => {
   threshold = e.target.value / 100;
-  $('threshVal').textContent = threshold.toFixed(2);
+  $("threshVal").textContent = threshold.toFixed(2);
 });
 
 // ══════════════════════════════════════════════════
 //  Capture
 // ══════════════════════════════════════════════════
-$('btnCapture').addEventListener('click', () => {
-  const c = document.createElement('canvas');
-  c.width  = $overlay.width;
+$("btnCapture").addEventListener("click", () => {
+  const c = document.createElement("canvas");
+  c.width = $overlay.width;
   c.height = $overlay.height;
-  const cx = c.getContext('2d');
+  const cx = c.getContext("2d");
   cx.drawImage($video, 0, 0, c.width, c.height);
   cx.drawImage($overlay, 0, 0);
-  const a = document.createElement('a');
+  const a = document.createElement("a");
   a.download = `detection-${Date.now()}.png`;
-  a.href = c.toDataURL('image/png');
+  a.href = c.toDataURL("image/png");
   a.click();
-  toast('Screenshot saved');
+  toast("Screenshot saved");
 });
 
 // ══════════════════════════════════════════════════
@@ -217,8 +221,11 @@ async function loop() {
   let dets = [];
 
   if (isModelLoaded()) {
-    try { dets = await detect($video, threshold); }
-    catch (e) { console.warn('Inference err:', e); }
+    try {
+      dets = await detect($video, threshold);
+    } catch (e) {
+      console.warn("Inference err:", e);
+    }
   }
 
   const ms = (performance.now() - t0).toFixed(1);
@@ -229,8 +236,8 @@ async function loop() {
   frames++;
   const now = performance.now();
   fpsTimes.push(now);
-  fpsTimes = fpsTimes.filter(t => now - t < 1000);
-  $('fpsVal').textContent = fpsTimes.length;
+  fpsTimes = fpsTimes.filter((t) => now - t < 1000);
+  $("fpsVal").textContent = fpsTimes.length;
 
   rafId = requestAnimationFrame(loop);
 }
@@ -240,10 +247,18 @@ async function loop() {
 // ══════════════════════════════════════════════════
 function iou(a, b) {
   // a, b are [x, y, w, h]
-  const ax1 = a[0], ay1 = a[1], ax2 = a[0] + a[2], ay2 = a[1] + a[3];
-  const bx1 = b[0], by1 = b[1], bx2 = b[0] + b[2], by2 = b[1] + b[3];
-  const ix1 = Math.max(ax1, bx1), iy1 = Math.max(ay1, by1);
-  const ix2 = Math.min(ax2, bx2), iy2 = Math.min(ay2, by2);
+  const ax1 = a[0],
+    ay1 = a[1],
+    ax2 = a[0] + a[2],
+    ay2 = a[1] + a[3];
+  const bx1 = b[0],
+    by1 = b[1],
+    bx2 = b[0] + b[2],
+    by2 = b[1] + b[3];
+  const ix1 = Math.max(ax1, bx1),
+    iy1 = Math.max(ay1, by1);
+  const ix2 = Math.min(ax2, bx2),
+    iy2 = Math.min(ay2, by2);
   if (ix2 <= ix1 || iy2 <= iy1) return 0;
   const inter = (ix2 - ix1) * (iy2 - iy1);
   const union = a[2] * a[3] + b[2] * b[3] - inter;
@@ -251,7 +266,7 @@ function iou(a, b) {
 }
 
 const LOG_IOU_THRESH = 0.5;
-const LOG_PERSIST_MS = 2000; // must persist for 2 seconds before logging
+const LOG_PERSIST_MS = 500; // must persist for 2 seconds before logging
 
 // Pending detections: waiting to be promoted to the log
 // Each: { classId, className, confidence, bbox, firstSeen }
@@ -270,13 +285,13 @@ function logDetections(dets) {
 
   for (const d of dets) {
     // Already in the permanent log? Skip entirely.
-    const inLog = damageLog.some(e =>
-      e.classId === d.classId && iou(e.bbox, d.bbox) > LOG_IOU_THRESH
+    const inLog = damageLog.some(
+      (e) => e.classId === d.classId && iou(e.bbox, d.bbox) > LOG_IOU_THRESH,
     );
     if (inLog) {
       // Update confidence if improved
-      const match = damageLog.find(e =>
-        e.classId === d.classId && iou(e.bbox, d.bbox) > LOG_IOU_THRESH
+      const match = damageLog.find(
+        (e) => e.classId === d.classId && iou(e.bbox, d.bbox) > LOG_IOU_THRESH,
       );
       if (match && d.confidence > match.confidence) {
         match.confidence = d.confidence;
@@ -289,7 +304,10 @@ function logDetections(dets) {
     let foundIdx = -1;
     for (let i = 0; i < pendingDets.length; i++) {
       if (matched.has(i)) continue;
-      if (pendingDets[i].classId === d.classId && iou(pendingDets[i].bbox, d.bbox) > LOG_IOU_THRESH) {
+      if (
+        pendingDets[i].classId === d.classId &&
+        iou(pendingDets[i].bbox, d.bbox) > LOG_IOU_THRESH
+      ) {
         foundIdx = i;
         break;
       }
@@ -299,7 +317,10 @@ function logDetections(dets) {
       // Update existing pending entry
       matched.add(foundIdx);
       pendingDets[foundIdx].bbox = d.bbox;
-      pendingDets[foundIdx].confidence = Math.max(pendingDets[foundIdx].confidence, d.confidence);
+      pendingDets[foundIdx].confidence = Math.max(
+        pendingDets[foundIdx].confidence,
+        d.confidence,
+      );
 
       // Check if it's been 2 seconds → promote to log
       if (now - pendingDets[foundIdx].firstSeen >= LOG_PERSIST_MS) {
@@ -331,13 +352,18 @@ function logDetections(dets) {
 }
 
 function renderLog() {
-  $('logCount').textContent = damageLog.length;
-  const list = $('logList');
+  $("logCount").textContent = damageLog.length;
+  const list = $("logList");
   if (!damageLog.length) {
-    list.innerHTML = '<div class="empty-msg">Detected damage will be logged here.</div>';
+    list.innerHTML =
+      '<div class="empty-msg">Detected damage will be logged here.</div>';
     return;
   }
-  list.innerHTML = damageLog.slice().reverse().map(e => `
+  list.innerHTML = damageLog
+    .slice()
+    .reverse()
+    .map(
+      (e) => `
     <div class="det-item log-entry" style="border-left-color:${getColor(e.classId)}">
       <div class="det-swatch" style="background:${getColor(e.classId)}"></div>
       <span class="det-label">${e.className}</span>
@@ -345,37 +371,42 @@ function renderLog() {
       <span class="det-time">${e.timestamp}</span>
       <button class="log-del" data-id="${e.id}">✕</button>
     </div>
-  `).join('');
+  `,
+    )
+    .join("");
 }
 
 // Delete single log entry
-document.addEventListener('click', (e) => {
-  if (e.target.classList.contains('log-del')) {
+document.addEventListener("click", (e) => {
+  if (e.target.classList.contains("log-del")) {
     const id = +e.target.dataset.id;
-    damageLog = damageLog.filter(e => e.id !== id);
+    damageLog = damageLog.filter((e) => e.id !== id);
     renderLog();
   }
 });
 
 // Clear all logs
-$('btnClearLog').addEventListener('click', () => {
+$("btnClearLog").addEventListener("click", () => {
   damageLog = [];
   logNextId = 1;
   renderLog();
 });
 
 function updateUI(dets, ms) {
-  $('sDet').textContent = dets.length;
-  $('sInf').textContent = ms;
-  $('sFrm').textContent = frames;
-  $('detCount').textContent = dets.length;
+  $("sDet").textContent = dets.length;
+  $("sInf").textContent = ms;
+  $("sFrm").textContent = frames;
+  $("detCount").textContent = dets.length;
 
-  $('sAvg').textContent = dets.length
-    ? ((dets.reduce((s, d) => s + d.confidence, 0) / dets.length) * 100).toFixed(0) + '%'
-    : '—';
+  $("sAvg").textContent = dets.length
+    ? (
+        (dets.reduce((s, d) => s + d.confidence, 0) / dets.length) *
+        100
+      ).toFixed(0) + "%"
+    : "—";
 
   // Live detections panel (changes every frame)
-  const list = $('detList');
+  const list = $("detList");
   if (!dets.length) {
     list.innerHTML = running
       ? '<div class="empty-msg">Scanning…<br/>No damage detected.</div>'
@@ -384,13 +415,16 @@ function updateUI(dets, ms) {
     list.innerHTML = dets
       .sort((a, b) => b.confidence - a.confidence)
       .slice(0, 25)
-      .map(d => `
+      .map(
+        (d) => `
         <div class="det-item" style="border-left-color:${getColor(d.classId)}">
           <div class="det-swatch" style="background:${getColor(d.classId)}"></div>
           <span class="det-label">${d.className}</span>
           <span class="det-conf">${(d.confidence * 100).toFixed(1)}%</span>
         </div>
-      `).join('');
+      `,
+      )
+      .join("");
   }
 
   // Log new detections (persistent)
@@ -401,8 +435,8 @@ function updateUI(dets, ms) {
 //  Toast
 // ══════════════════════════════════════════════════
 function toast(msg, isErr = false) {
-  const el = $('toast');
+  const el = $("toast");
   el.textContent = msg;
-  el.className = 'toast show' + (isErr ? ' error' : '');
-  setTimeout(() => el.classList.remove('show'), 3000);
+  el.className = "toast show" + (isErr ? " error" : "");
+  setTimeout(() => el.classList.remove("show"), 3000);
 }
