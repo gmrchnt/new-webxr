@@ -6,7 +6,7 @@ ort.env.wasm.wasmPaths =
   "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.0/dist/";
 ort.env.wasm.numThreads = 1;
 
-const INPUT_SIZE = 1080;
+const INPUT_SIZE = 640;
 let session = null;
 
 // ── Pre-allocated buffers (avoid GC every frame) ──
