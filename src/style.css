@@ -32,17 +32,19 @@ html, body {
 
 .hidden { display: none !important; }
 
-/* ── Scanlines ── */
-body::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background: repeating-linear-gradient(
-    0deg, transparent, transparent 3px,
-    rgba(0, 229, 160, 0.012) 3px, rgba(0, 229, 160, 0.012) 4px
-  );
-  pointer-events: none;
-  z-index: 9999;
+/* ── Scanlines (desktop only) ── */
+@media (hover: hover) {
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg, transparent, transparent 3px,
+      rgba(0, 229, 160, 0.012) 3px, rgba(0, 229, 160, 0.012) 4px
+    );
+    pointer-events: none;
+    z-index: 0;
+  }
 }
 
 /* ══════════════════════════════════════════
@@ -142,16 +144,19 @@ body::after {
 /* Controls */
 .controls {
   display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+  position: relative; z-index: 10;
 }
 
 .btn {
   font-family: var(--font-mono); font-size: 12px; font-weight: 600;
-  padding: 9px 18px; border-radius: 8px;
+  padding: 12px 18px; border-radius: 8px;
   border: 1px solid var(--border); background: var(--bg-card);
   color: var(--text-primary); cursor: pointer;
   transition: all 0.15s;
   display: inline-flex; align-items: center; gap: 7px;
   white-space: nowrap;
+  min-height: 44px;
+  -webkit-tap-highlight-color: transparent;
 }
 .btn:hover { border-color: var(--accent); background: var(--accent-dim); }
 .btn:active { transform: scale(0.97); }
@@ -493,10 +498,10 @@ body::after {
     grid-template-columns: 1fr;
     height: auto; overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    padding: 14px 16px;
   }
-  .feed-col { min-height: 50vh; }
+  .feed-col { min-height: 40vh; }
   .app-header { padding: 0 16px; }
-  .main-grid { padding: 14px 16px; }
 
   .sidebar {
     overflow-y: auto;
@@ -506,6 +511,46 @@ body::after {
 
   .ar-sidebar {
     width: 220px; top: 100px; right: 8px;
+  }
+}
+
+/* Landscape on mobile */
+@media (max-height: 500px) and (orientation: landscape) {
+  .app-header { height: 44px; }
+  .app-header .logo-mark { width: 28px; height: 28px; font-size: 13px; }
+  .app-header .logo-text { font-size: 13px; }
+
+  .main-grid {
+    grid-template-columns: 1fr 280px;
+    height: calc(100vh - 44px);
+    height: calc(100dvh - 44px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 10px 12px;
+    gap: 12px;
+  }
+
+  .feed-col { min-height: 0; gap: 8px; }
+
+  .viewport { min-height: 120px; }
+
+  .controls {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .controls .btn { padding: 6px 12px; font-size: 11px; }
+
+  .sidebar { gap: 8px; }
+  .panel-head { padding: 8px 12px; }
+  .panel-body { padding: 10px 12px; }
+  .stats-grid { gap: 6px; }
+  .stat { padding: 6px 8px; }
+  .stat-val { font-size: 18px; }
+
+  .ar-hud-top { padding: 6px 10px; }
+  .ar-sidebar {
+    width: 200px; top: 50px; right: 6px;
+    max-height: calc(100vh - 60px);
   }
 }
 

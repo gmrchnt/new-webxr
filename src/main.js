@@ -1,6 +1,5 @@
 import './style.css';
 import { loadModel, detect, isModelLoaded } from './detector.js';
-import { drawDetections } from './renderer.js';
 import { getColor, CLASS_NAMES } from './classes.js';
 import {
   startARSession, endARSession, getSession, getRefSpace,
@@ -464,6 +463,7 @@ $btnStartAR.addEventListener('click', async () => {
 
     session.addEventListener('end', () => {
       arActive = false;
+      stopCameraStream();
       $arOverlay.classList.add('hidden');
       document.getElementById('mainHeader').classList.remove('hidden');
       document.getElementById('mainGrid').classList.remove('hidden');
@@ -487,6 +487,47 @@ $btnStopAR.addEventListener('click', async () => {
 //  XR Render Loop
 // ══════════════════════════════════════════════════
 let inferring = false;
+let cameraStream = null;
+let cameraVideo = null;
+
+/**
+ * Start a parallel camera stream for YOLO inference.
+ * WebXR owns the AR camera — we can't read its pixels reliably.
+ * Instead we open a second getUserMedia stream and run YOLO on that.
+ * The bounding boxes are drawn on the pointCanvas overlay.
+ */
+async function startCameraStream() {
+  if (cameraVideo) return;
+
+  cameraVideo = document.createElement('video');
+  cameraVideo.setAttribute('playsinline', '');
+  cameraVideo.setAttribute('autoplay', '');
+  cameraVideo.muted = true;
+  cameraVideo.style.display = 'none';
+  document.body.appendChild(cameraVideo);
+
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
+    });
+    cameraVideo.srcObject = cameraStream;
+    await cameraVideo.play();
+  } catch (e) {
+    console.warn('Parallel camera stream failed:', e);
+    cameraVideo = null;
+  }
+}
+
+function stopCameraStream() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
+  }
+  if (cameraVideo) {
+    cameraVideo.remove();
+    cameraVideo = null;
+  }
+}
 
 async function xrLoop(timestamp, frame) {
   const session = getSession();
@@ -502,10 +543,6 @@ async function xrLoop(timestamp, frame) {
   const pose = frame.getViewerPose(refSpace);
   if (!pose) return;
 
-  // Get the GL layer and bind
-  const glLayer = session.renderState.baseLayer;
-  const glCtx = glLayer.getContext ? undefined : null;
-
   // FPS tracking
   frames++;
   const now = performance.now();
@@ -513,54 +550,35 @@ async function xrLoop(timestamp, frame) {
   fpsTimes = fpsTimes.filter(t => now - t < 1000);
   document.getElementById('arFps').textContent = fpsTimes.length;
 
-  // Mode 2: run YOLO inference
+  // Mode 2: run YOLO on the parallel camera stream
   if (currentMode === 'auto' && isModelLoaded() && !inferring) {
+    // Ensure camera stream is running
+    if (!cameraVideo) await startCameraStream();
+    if (!cameraVideo || cameraVideo.readyState < 2) return;
+
     inferring = true;
 
     try {
-      // Grab camera image from XR framebuffer
-      const vp = pose.views[0];
-      const viewport = glLayer.getViewport(vp);
-      const gl = glLayer.context || glLayer._context;
+      const vw = cameraVideo.videoWidth;
+      const vh = cameraVideo.videoHeight;
 
-      if (gl && viewport) {
-        // Read pixels from WebXR framebuffer
-        const w = viewport.width;
-        const h = viewport.height;
-        const pixels = new Uint8Array(w * h * 4);
+      const t0 = performance.now();
+      const dets = await detect(cameraVideo, threshold);
+      const ms = (performance.now() - t0).toFixed(1);
 
-        gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
-        gl.readPixels(viewport.x, viewport.y, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      document.getElementById('sDet').textContent = dets.length;
+      document.getElementById('sInf').textContent = ms;
 
-        // Create ImageData and draw to offscreen canvas for detection
-        const offscreen = new OffscreenCanvas(w, h);
-        const offCtx = offscreen.getContext('2d');
-        const imgData = new ImageData(new Uint8ClampedArray(pixels), w, h);
+      $autoStatus.textContent = dets.length
+        ? `${dets.length} damage${dets.length > 1 ? 's' : ''} detected`
+        : 'Scanning…';
 
-        // WebGL readPixels is flipped, so flip vertically
-        offCtx.save();
-        offCtx.translate(0, h);
-        offCtx.scale(1, -1);
-        offCtx.putImageData(imgData, 0, 0);
-        offCtx.restore();
+      // Draw bounding boxes on the pointCanvas overlay
+      drawAutoDetections(dets, vw, vh);
 
-        // Create a temporary video-like source for the detector
-        const t0 = performance.now();
-        const dets = await detectFromCanvas(offscreen, threshold);
-        const ms = (performance.now() - t0).toFixed(1);
-
-        document.getElementById('sDet').textContent = dets.length;
-        document.getElementById('sInf').textContent = ms;
-
-        $autoStatus.textContent = dets.length
-          ? `${dets.length} damage${dets.length > 1 ? 's' : ''} detected`
-          : 'Scanning…';
-
-        // Draw detections on the point canvas
-        if (dets.length > 0) {
-          drawAutoDetections(dets, w, h);
-          await processAutoDetections(dets, w, h);
-        }
+      // Measure and log new detections
+      if (dets.length > 0) {
+        await processAutoDetections(dets, vw, vh);
       }
     } catch (e) {
       console.warn('Auto detection error:', e);
@@ -570,31 +588,13 @@ async function xrLoop(timestamp, frame) {
   }
 }
 
-/**
- * Run YOLO detection on an OffscreenCanvas directly.
- */
-async function detectFromCanvas(canvas, thresh) {
-  if (!isModelLoaded()) return [];
-
-  // Use the detect function but we need to adapt for canvas input
-  // We'll create a temporary video-like object
-  const fakeVideo = {
-    videoWidth: canvas.width,
-    videoHeight: canvas.height,
-    // drawImage works with OffscreenCanvas
-  };
-
-  // We need to use the detector's detect but with canvas as source
-  // The detector uses drawImage(videoEl, ...) which works with canvas too
-  return await detect(canvas, thresh);
-}
-
 function drawAutoDetections(dets, sourceW, sourceH) {
   clearPointCanvas();
   const ctx = $pointCtx;
   const cw = $pointCanvas.width;
   const ch = $pointCanvas.height;
 
+  // Map detection coords (in source video pixels) to screen overlay
   const sx = cw / sourceW;
   const sy = ch / sourceH;
 
@@ -603,23 +603,58 @@ function drawAutoDetections(dets, sourceW, sourceH) {
     const dx = x * sx, dy = y * sy, dw = w * sx, dh = h * sy;
     const color = getColor(det.classId);
 
-    // Box
+    // ── Main box ──
     ctx.strokeStyle = color;
     ctx.lineWidth = 2.5;
+    ctx.setLineDash([]);
     ctx.strokeRect(dx, dy, dw, dh);
 
-    // Label
+    // ── Corner accents ──
+    const cl = Math.min(16, dw * 0.25, dh * 0.25);
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = color;
+    drawCorner(ctx, dx, dy, cl, 1, 1);
+    drawCorner(ctx, dx + dw, dy, cl, -1, 1);
+    drawCorner(ctx, dx, dy + dh, cl, 1, -1);
+    drawCorner(ctx, dx + dw, dy + dh, cl, -1, -1);
+
+    // ── Label with class + confidence ──
     const label = `${det.className} ${(det.confidence * 100).toFixed(0)}%`;
-    ctx.font = '600 12px "JetBrains Mono", monospace';
-    const tw = ctx.measureText(label).width + 10;
+    ctx.font = '600 13px "JetBrains Mono", monospace';
+    const tw = ctx.measureText(label).width + 12;
+    const th = 22;
+
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.roundRect(dx, dy - 22, tw, 20, [4, 4, 0, 0]);
+    ctx.roundRect(dx, dy - th - 2, tw, th, [4, 4, 0, 0]);
     ctx.fill();
+
     ctx.fillStyle = '#000';
     ctx.textBaseline = 'middle';
-    ctx.fillText(label, dx + 5, dy - 12);
+    ctx.fillText(label, dx + 6, dy - th / 2 - 2);
+
+    // ── Diagonal line (shows what's being measured) ──
+    ctx.beginPath();
+    ctx.moveTo(dx, dy);
+    ctx.lineTo(dx + dw, dy + dh);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // ── Soft fill ──
+    ctx.fillStyle = color + '15';
+    ctx.fillRect(dx, dy, dw, dh);
   }
+}
+
+function drawCorner(ctx, x, y, len, dirX, dirY) {
+  ctx.beginPath();
+  ctx.moveTo(x, y + len * dirY);
+  ctx.lineTo(x, y);
+  ctx.lineTo(x + len * dirX, y);
+  ctx.stroke();
 }
 
 // ══════════════════════════════════════════════════
