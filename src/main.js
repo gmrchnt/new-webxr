@@ -121,6 +121,11 @@ let fpsTimes = [];
 let damageLog = [];    // { id, className, classId, confidence, timestamp, bbox }
 let logNextId = 1;
 
+// Live detections with persistence (3 second TTL)
+const LIVE_TTL = 3000;
+let liveDets = [];  // { classId, className, confidence, bbox, lastSeen }
+let currentDets = []; // reference for click handler
+
 // ══════════════════════════════════════════════════
 //  Model loading
 // ══════════════════════════════════════════════════
@@ -240,7 +245,6 @@ async function loop() {
 // ══════════════════════════════════════════════════
 
 // Store current frame's detections so click handler can access them
-let currentDets = [];
 
 function renderLog() {
   $('logCount').textContent = damageLog.length;
@@ -300,31 +304,75 @@ function updateUI(dets, ms) {
   $('sDet').textContent = dets.length;
   $('sInf').textContent = ms;
   $('sFrm').textContent = frames;
-  $('detCount').textContent = dets.length;
 
-  $('sAvg').textContent = dets.length
-    ? ((dets.reduce((s, d) => s + d.confidence, 0) / dets.length) * 100).toFixed(0) + '%'
+  const now = performance.now();
+
+  // Update live detections: merge new dets, refresh timestamps
+  for (const d of dets) {
+    // Find existing live entry: same class + overlapping region
+    const existing = liveDets.find(l =>
+      l.classId === d.classId && bboxOverlap(l.bbox, d.bbox)
+    );
+    if (existing) {
+      // Refresh: update bbox, confidence, and reset timer
+      existing.bbox = d.bbox;
+      existing.confidence = Math.max(existing.confidence, d.confidence);
+      existing.lastSeen = now;
+    } else {
+      // New live detection
+      liveDets.push({
+        classId: d.classId,
+        className: d.className,
+        confidence: d.confidence,
+        bbox: d.bbox,
+        lastSeen: now,
+      });
+    }
+  }
+
+  // Prune: remove entries older than 3 seconds
+  liveDets = liveDets.filter(l => now - l.lastSeen < LIVE_TTL);
+
+  // Store sorted for click handler
+  currentDets = liveDets.sort((a, b) => b.confidence - a.confidence).slice(0, 25);
+
+  $('detCount').textContent = currentDets.length;
+  $('sAvg').textContent = currentDets.length
+    ? ((currentDets.reduce((s, d) => s + d.confidence, 0) / currentDets.length) * 100).toFixed(0) + '%'
     : '—';
 
-  // Store for click handler
-  currentDets = dets.sort((a, b) => b.confidence - a.confidence).slice(0, 25);
-
-  // Live detections panel — each item is clickable
+  // Render live detections panel
   const list = $('detList');
   if (!currentDets.length) {
     list.innerHTML = running
       ? '<div class="empty-msg">Scanning…<br/>No damage detected.</div>'
       : '<div class="empty-msg">No detections yet.</div>';
   } else {
-    list.innerHTML = currentDets.map((d, i) => `
-      <div class="det-item live-det-item" data-idx="${i}" style="border-left-color:${getColor(d.classId)}; cursor:pointer;" title="Tap to log">
-        <div class="det-swatch" style="background:${getColor(d.classId)}"></div>
-        <span class="det-label">${d.className}</span>
-        <span class="det-conf">${(d.confidence * 100).toFixed(1)}%</span>
-        <span class="det-add">+</span>
-      </div>
-    `).join('');
+    list.innerHTML = currentDets.map((d, i) => {
+      // Show time remaining as opacity fade
+      const age = now - d.lastSeen;
+      const opacity = Math.max(0.4, 1 - (age / LIVE_TTL) * 0.6);
+      return `
+        <div class="det-item live-det-item" data-idx="${i}" style="border-left-color:${getColor(d.classId)}; cursor:pointer; opacity:${opacity.toFixed(2)};" title="Tap to log">
+          <div class="det-swatch" style="background:${getColor(d.classId)}"></div>
+          <span class="det-label">${d.className}</span>
+          <span class="det-conf">${(d.confidence * 100).toFixed(1)}%</span>
+          <span class="det-add">+</span>
+        </div>
+      `;
+    }).join('');
   }
+}
+
+// Simple overlap check: do two bboxes [x,y,w,h] overlap significantly?
+function bboxOverlap(a, b) {
+  const ax1 = a[0], ay1 = a[1], ax2 = a[0]+a[2], ay2 = a[1]+a[3];
+  const bx1 = b[0], by1 = b[1], bx2 = b[0]+b[2], by2 = b[1]+b[3];
+  const ix = Math.max(0, Math.min(ax2,bx2) - Math.max(ax1,bx1));
+  const iy = Math.max(0, Math.min(ay2,by2) - Math.max(ay1,by1));
+  const inter = ix * iy;
+  const smaller = Math.min(a[2]*a[3], b[2]*b[3]);
+  return inter > smaller * 0.3;
 }
 
 // ══════════════════════════════════════════════════
