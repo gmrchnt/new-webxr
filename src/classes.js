@@ -3,13 +3,21 @@
 // in the exact order the model was trained on.
 // ─────────────────────────────────────────────────
 export const CLASS_NAMES = [
-  'damage',
+  "dent",
+  "scratch",
+  "crack",
+  "glass_shatter",
+  "tire_flat",
+  "lamp_broken",
 ];
 
 export const BOX_COLORS = [
-  '#00e5a0','#ff4757','#ffa502','#3742fa','#ff6b81','#7bed9f',
-  '#70a1ff','#eccc68','#a29bfe','#fd79a8','#00cec9','#e17055',
-  '#6c5ce7','#fdcb6e','#fab1a0','#74b9ff','#55efc4','#ff7675',
+  "#770505",
+  "#ff0800",
+  "#ffa502",
+  "#3742fa",
+  "#00fff2",
+  "#bbc900",
 ];
 
 export function getColor(classId) {
