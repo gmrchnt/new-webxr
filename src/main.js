@@ -250,38 +250,84 @@ function iou(a, b) {
   return inter / (union + 1e-6);
 }
 
-const LOG_IOU_THRESH = 0.5; // overlap threshold to consider same damage
+const LOG_IOU_THRESH = 0.5;
+const LOG_PERSIST_MS = 2000; // must persist for 2 seconds before logging
 
+// Pending detections: waiting to be promoted to the log
+// Each: { classId, className, confidence, bbox, firstSeen }
+let pendingDets = [];
+
+/**
+ * Called every frame with current detections.
+ * - Match each det to pending entries via IoU
+ * - New dets → add to pending with timestamp
+ * - Pending entries not seen this frame → remove (damage gone)
+ * - Pending entries alive for 2s+ → promote to damageLog
+ */
 function logDetections(dets) {
-  let changed = false;
+  const now = performance.now();
+  const matched = new Set(); // indices of pendingDets that matched this frame
+
   for (const d of dets) {
-    // Check if this detection overlaps strongly with any existing log entry of the same class
-    const isDuplicate = damageLog.some(entry =>
-      entry.classId === d.classId && iou(entry.bbox, d.bbox) > LOG_IOU_THRESH
+    // Already in the permanent log? Skip entirely.
+    const inLog = damageLog.some(e =>
+      e.classId === d.classId && iou(e.bbox, d.bbox) > LOG_IOU_THRESH
     );
-    if (isDuplicate) {
-      // Update confidence if higher (same damage seen with better confidence)
-      const match = damageLog.find(entry =>
-        entry.classId === d.classId && iou(entry.bbox, d.bbox) > LOG_IOU_THRESH
+    if (inLog) {
+      // Update confidence if improved
+      const match = damageLog.find(e =>
+        e.classId === d.classId && iou(e.bbox, d.bbox) > LOG_IOU_THRESH
       );
       if (match && d.confidence > match.confidence) {
         match.confidence = d.confidence;
-        changed = true;
+        renderLog();
       }
       continue;
     }
 
-    damageLog.push({
-      id: logNextId++,
-      className: d.className,
-      classId: d.classId,
-      confidence: d.confidence,
-      timestamp: new Date().toLocaleTimeString(),
-      bbox: d.bbox,
-    });
-    changed = true;
+    // Match to a pending entry
+    let foundIdx = -1;
+    for (let i = 0; i < pendingDets.length; i++) {
+      if (matched.has(i)) continue;
+      if (pendingDets[i].classId === d.classId && iou(pendingDets[i].bbox, d.bbox) > LOG_IOU_THRESH) {
+        foundIdx = i;
+        break;
+      }
+    }
+
+    if (foundIdx >= 0) {
+      // Update existing pending entry
+      matched.add(foundIdx);
+      pendingDets[foundIdx].bbox = d.bbox;
+      pendingDets[foundIdx].confidence = Math.max(pendingDets[foundIdx].confidence, d.confidence);
+
+      // Check if it's been 2 seconds → promote to log
+      if (now - pendingDets[foundIdx].firstSeen >= LOG_PERSIST_MS) {
+        damageLog.push({
+          id: logNextId++,
+          className: d.className,
+          classId: d.classId,
+          confidence: pendingDets[foundIdx].confidence,
+          timestamp: new Date().toLocaleTimeString(),
+          bbox: d.bbox,
+        });
+        pendingDets.splice(foundIdx, 1);
+        renderLog();
+      }
+    } else {
+      // New pending detection
+      pendingDets.push({
+        classId: d.classId,
+        className: d.className,
+        confidence: d.confidence,
+        bbox: d.bbox,
+        firstSeen: now,
+      });
+    }
   }
-  if (changed) renderLog();
+
+  // Remove pending entries that weren't seen this frame (damage moved away)
+  pendingDets = pendingDets.filter((_, i) => matched.has(i));
 }
 
 function renderLog() {
