@@ -1,4 +1,4 @@
-import { getColor } from './classes.js';
+import { getColor } from "./classes.js";
 
 /**
  * Draw detection bounding boxes on an overlay canvas.
@@ -10,12 +10,15 @@ import { getColor } from './classes.js';
 export function drawDetections(ctx, detections, videoEl, canvas) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  const sx = canvas.width  / (videoEl.videoWidth  || 1);
+  const sx = canvas.width / (videoEl.videoWidth || 1);
   const sy = canvas.height / (videoEl.videoHeight || 1);
 
   for (const det of detections) {
     const [x, y, w, h] = det.bbox;
-    const dx = x * sx, dy = y * sy, dw = w * sx, dh = h * sy;
+    const dx = x * sx,
+      dy = y * sy,
+      dw = w * sx,
+      dh = h * sy;
     const color = getColor(det.classId);
 
     // ── Main box ──
@@ -46,12 +49,12 @@ export function drawDetections(ctx, detections, videoEl, canvas) {
     ctx.roundRect(dx, dy - th - 2, tw, th, [4, 4, 0, 0]);
     ctx.fill();
 
-    ctx.fillStyle = '#000';
-    ctx.textBaseline = 'middle';
+    ctx.fillStyle = "#000";
+    ctx.textBaseline = "middle";
     ctx.fillText(label, dx + 5, dy - th / 2 - 2);
 
     // ── Soft fill ──
-    ctx.fillStyle = color + '0d';
+    ctx.fillStyle = color + "0d";
     ctx.fillRect(dx, dy, dw, dh);
   }
 }
