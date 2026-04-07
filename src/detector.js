@@ -1,9 +1,8 @@
-import * as ort from "onnxruntime-web";
-import { CLASS_NAMES } from "./classes.js";
+import * as ort from 'onnxruntime-web';
+import { CLASS_NAMES } from './classes.js';
 
 // ── WASM config ──
-ort.env.wasm.wasmPaths =
-  "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.0/dist/";
+ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.0/dist/';
 ort.env.wasm.numThreads = 1;
 
 const INPUT_SIZE = 640;
@@ -11,15 +10,15 @@ let session = null;
 
 // ── Pre-allocated buffers (avoid GC every frame) ──
 const TOTAL_PX = INPUT_SIZE * INPUT_SIZE;
-let f32Buffer = null; // reused Float32Array
-let offscreen = null; // reused OffscreenCanvas
+let f32Buffer = null;        // reused Float32Array
+let offscreen = null;        // reused OffscreenCanvas
 let offCtx = null;
 
 function ensureBuffers() {
   if (!f32Buffer) f32Buffer = new Float32Array(3 * TOTAL_PX);
   if (!offscreen) {
     offscreen = new OffscreenCanvas(INPUT_SIZE, INPUT_SIZE);
-    offCtx = offscreen.getContext("2d", { willReadFrequently: true });
+    offCtx = offscreen.getContext('2d', { willReadFrequently: true });
   }
 }
 
@@ -28,8 +27,8 @@ function ensureBuffers() {
  */
 export async function loadModel(url) {
   session = await ort.InferenceSession.create(url, {
-    executionProviders: ["wasm"],
-    graphOptimizationLevel: "all",
+    executionProviders: ['wasm'],
+    graphOptimizationLevel: 'all',
   });
   ensureBuffers();
   return session;
@@ -58,7 +57,7 @@ export async function detect(source, threshold = 0.4) {
   const dx = (INPUT_SIZE - nw) / 2;
   const dy = (INPUT_SIZE - nh) / 2;
 
-  offCtx.fillStyle = "#808080";
+  offCtx.fillStyle = '#808080';
   offCtx.fillRect(0, 0, INPUT_SIZE, INPUT_SIZE);
   offCtx.drawImage(source, dx, dy, nw, nh);
 
@@ -68,17 +67,12 @@ export async function detect(source, threshold = 0.4) {
   // ── Build CHW float32 tensor (reuse buffer) ──
   for (let i = 0; i < TOTAL_PX; i++) {
     const j = i << 2; // i * 4
-    f32Buffer[i] = px[j] * 0.00392156863; // / 255
-    f32Buffer[TOTAL_PX + i] = px[j + 1] * 0.00392156863;
+    f32Buffer[i]              = px[j]     * 0.00392156863; // / 255
+    f32Buffer[TOTAL_PX + i]   = px[j + 1] * 0.00392156863;
     f32Buffer[2 * TOTAL_PX + i] = px[j + 2] * 0.00392156863;
   }
 
-  const tensor = new ort.Tensor("float32", f32Buffer, [
-    1,
-    3,
-    INPUT_SIZE,
-    INPUT_SIZE,
-  ]);
+  const tensor = new ort.Tensor('float32', f32Buffer, [1, 3, INPUT_SIZE, INPUT_SIZE]);
   const feeds = { [session.inputNames[0]]: tensor };
 
   // ── Inference ──
@@ -88,8 +82,8 @@ export async function detect(source, threshold = 0.4) {
   // ── Parse output [1, 4+num_classes, num_boxes] ──
   const data = output.data;
   const numBoxes = output.dims[2];
-  const numOut = output.dims[1];
-  const numCls = numOut - 4;
+  const numOut   = output.dims[1];
+  const numCls   = numOut - 4;
 
   const raw = [];
 
@@ -99,10 +93,7 @@ export async function detect(source, threshold = 0.4) {
     let maxCls = 0;
     for (let c = 0; c < numCls; c++) {
       const s = data[(c + 4) * numBoxes + i];
-      if (s > maxScore) {
-        maxScore = s;
-        maxCls = c;
-      }
+      if (s > maxScore) { maxScore = s; maxCls = c; }
     }
     if (maxScore <= threshold) continue;
 
@@ -141,7 +132,7 @@ function nms(dets, iouThresh) {
   dets.sort((a, b) => b.confidence - a.confidence);
   const keep = [];
   for (const d of dets) {
-    if (keep.every((k) => iou(d.bbox, k.bbox) <= iouThresh)) {
+    if (keep.every(k => iou(d.bbox, k.bbox) <= iouThresh)) {
       keep.push(d);
     }
   }

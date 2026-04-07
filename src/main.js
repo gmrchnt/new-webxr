@@ -78,6 +78,18 @@ document.getElementById('app').innerHTML = `
         </div>
       </div>
 
+      <div class="panel grow">
+        <div class="panel-head">
+          Damage Log <span class="count" id="logCount">0</span>
+          <button class="log-clear-btn" id="btnClearLog">Clear</button>
+        </div>
+        <div class="det-scroll">
+          <div class="det-list" id="logList">
+            <div class="empty-msg">Detected damage will be logged here.</div>
+          </div>
+        </div>
+      </div>
+
       <div class="panel">
         <div class="panel-head">Model</div>
         <div class="panel-body info-rows">
@@ -104,6 +116,11 @@ let rafId = null;
 let threshold = 0.4;
 let frames = 0;
 let fpsTimes = [];
+
+// Persistent damage log
+let damageLog = [];    // { id, className, classId, confidence, timestamp }
+let logNextId = 1;
+let loggedHashes = new Set(); // deduplicate
 
 // ══════════════════════════════════════════════════
 //  Model loading
@@ -222,6 +239,63 @@ async function loop() {
 // ══════════════════════════════════════════════════
 //  UI updates
 // ══════════════════════════════════════════════════
+function detHash(d) {
+  // Coarse hash — same class + roughly same region = same damage
+  const [x, y, w, h] = d.bbox;
+  return `${d.classId}_${Math.round(x/40)}_${Math.round(y/40)}_${Math.round(w/40)}_${Math.round(h/40)}`;
+}
+
+function logDetections(dets) {
+  for (const d of dets) {
+    const h = detHash(d);
+    if (loggedHashes.has(h)) continue;
+    loggedHashes.add(h);
+    damageLog.push({
+      id: logNextId++,
+      className: d.className,
+      classId: d.classId,
+      confidence: d.confidence,
+      timestamp: new Date().toLocaleTimeString(),
+    });
+  }
+  renderLog();
+}
+
+function renderLog() {
+  $('logCount').textContent = damageLog.length;
+  const list = $('logList');
+  if (!damageLog.length) {
+    list.innerHTML = '<div class="empty-msg">Detected damage will be logged here.</div>';
+    return;
+  }
+  list.innerHTML = damageLog.slice().reverse().map(e => `
+    <div class="det-item log-entry" style="border-left-color:${getColor(e.classId)}">
+      <div class="det-swatch" style="background:${getColor(e.classId)}"></div>
+      <span class="det-label">${e.className}</span>
+      <span class="det-conf">${(e.confidence * 100).toFixed(0)}%</span>
+      <span class="det-time">${e.timestamp}</span>
+      <button class="log-del" data-id="${e.id}">✕</button>
+    </div>
+  `).join('');
+}
+
+// Delete single log entry
+document.addEventListener('click', (e) => {
+  if (e.target.classList.contains('log-del')) {
+    const id = +e.target.dataset.id;
+    damageLog = damageLog.filter(e => e.id !== id);
+    renderLog();
+  }
+});
+
+// Clear all logs
+$('btnClearLog').addEventListener('click', () => {
+  damageLog = [];
+  logNextId = 1;
+  loggedHashes.clear();
+  renderLog();
+});
+
 function updateUI(dets, ms) {
   $('sDet').textContent = dets.length;
   $('sInf').textContent = ms;
@@ -232,24 +306,27 @@ function updateUI(dets, ms) {
     ? ((dets.reduce((s, d) => s + d.confidence, 0) / dets.length) * 100).toFixed(0) + '%'
     : '—';
 
+  // Live detections panel (changes every frame)
   const list = $('detList');
   if (!dets.length) {
     list.innerHTML = running
       ? '<div class="empty-msg">Scanning…<br/>No damage detected.</div>'
       : '<div class="empty-msg">No detections yet.</div>';
-    return;
+  } else {
+    list.innerHTML = dets
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, 25)
+      .map(d => `
+        <div class="det-item" style="border-left-color:${getColor(d.classId)}">
+          <div class="det-swatch" style="background:${getColor(d.classId)}"></div>
+          <span class="det-label">${d.className}</span>
+          <span class="det-conf">${(d.confidence * 100).toFixed(1)}%</span>
+        </div>
+      `).join('');
   }
 
-  list.innerHTML = dets
-    .sort((a, b) => b.confidence - a.confidence)
-    .slice(0, 25)
-    .map(d => `
-      <div class="det-item" style="border-left-color:${getColor(d.classId)}">
-        <div class="det-swatch" style="background:${getColor(d.classId)}"></div>
-        <span class="det-label">${d.className}</span>
-        <span class="det-conf">${(d.confidence * 100).toFixed(1)}%</span>
-      </div>
-    `).join('');
+  // Log new detections (persistent)
+  if (dets.length > 0) logDetections(dets);
 }
 
 // ══════════════════════════════════════════════════
