@@ -1,21 +1,36 @@
 import * as ort from 'onnxruntime-web';
 import { CLASS_NAMES } from './classes.js';
 
-// ── Point ONNX Runtime to CDN for WASM files ──
+// ── WASM config ──
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.0/dist/';
 ort.env.wasm.numThreads = 1;
 
 const INPUT_SIZE = 640;
 let session = null;
 
+// ── Pre-allocated buffers (avoid GC every frame) ──
+const TOTAL_PX = INPUT_SIZE * INPUT_SIZE;
+let f32Buffer = null;        // reused Float32Array
+let offscreen = null;        // reused OffscreenCanvas
+let offCtx = null;
+
+function ensureBuffers() {
+  if (!f32Buffer) f32Buffer = new Float32Array(3 * TOTAL_PX);
+  if (!offscreen) {
+    offscreen = new OffscreenCanvas(INPUT_SIZE, INPUT_SIZE);
+    offCtx = offscreen.getContext('2d', { willReadFrequently: true });
+  }
+}
+
 /**
- * Load YOLOv8n ONNX model from a URL path.
+ * Load YOLOv8n ONNX model.
  */
 export async function loadModel(url) {
   session = await ort.InferenceSession.create(url, {
     executionProviders: ['wasm'],
     graphOptimizationLevel: 'all',
   });
+  ensureBuffers();
   return session;
 }
 
@@ -29,10 +44,11 @@ export function isModelLoaded() {
  */
 export async function detect(source, threshold = 0.4) {
   if (!session) return [];
+  ensureBuffers();
 
-  // Support both <video> and canvas/OffscreenCanvas
   const vw = source.videoWidth || source.width;
   const vh = source.videoHeight || source.height;
+  if (!vw || !vh) return [];
 
   // ── Letterbox resize ──
   const scale = Math.min(INPUT_SIZE / vw, INPUT_SIZE / vh);
@@ -41,8 +57,6 @@ export async function detect(source, threshold = 0.4) {
   const dx = (INPUT_SIZE - nw) / 2;
   const dy = (INPUT_SIZE - nh) / 2;
 
-  const offscreen = new OffscreenCanvas(INPUT_SIZE, INPUT_SIZE);
-  const offCtx = offscreen.getContext('2d');
   offCtx.fillStyle = '#808080';
   offCtx.fillRect(0, 0, INPUT_SIZE, INPUT_SIZE);
   offCtx.drawImage(source, dx, dy, nw, nh);
@@ -50,43 +64,45 @@ export async function detect(source, threshold = 0.4) {
   const imgData = offCtx.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE);
   const px = imgData.data;
 
-  // ── Build CHW float32 tensor [1,3,640,640] ──
-  const total = INPUT_SIZE * INPUT_SIZE;
-  const f32 = new Float32Array(3 * total);
-  for (let i = 0; i < total; i++) {
-    const j = i * 4;
-    f32[i]             = px[j]     / 255;
-    f32[total + i]     = px[j + 1] / 255;
-    f32[2 * total + i] = px[j + 2] / 255;
+  // ── Build CHW float32 tensor (reuse buffer) ──
+  for (let i = 0; i < TOTAL_PX; i++) {
+    const j = i << 2; // i * 4
+    f32Buffer[i]              = px[j]     * 0.00392156863; // / 255
+    f32Buffer[TOTAL_PX + i]   = px[j + 1] * 0.00392156863;
+    f32Buffer[2 * TOTAL_PX + i] = px[j + 2] * 0.00392156863;
   }
 
-  const tensor = new ort.Tensor('float32', f32, [1, 3, INPUT_SIZE, INPUT_SIZE]);
+  const tensor = new ort.Tensor('float32', f32Buffer, [1, 3, INPUT_SIZE, INPUT_SIZE]);
   const feeds = { [session.inputNames[0]]: tensor };
 
   // ── Inference ──
   const results = await session.run(feeds);
   const output = results[session.outputNames[0]];
 
-  // ── Parse: output shape [1, 4+num_classes, num_detections] ──
+  // ── Parse output [1, 4+num_classes, num_boxes] ──
   const data = output.data;
-  const numDets = output.dims[2];   // 8400
-  const numOut  = output.dims[1];   // 84
+  const numBoxes = output.dims[2];
+  const numOut   = output.dims[1];
+  const numCls   = numOut - 4;
 
   const raw = [];
 
-  for (let i = 0; i < numDets; i++) {
-    let maxScore = 0;
+  for (let i = 0; i < numBoxes; i++) {
+    // Find best class score (start at offset 4)
+    let maxScore = threshold; // pre-filter
     let maxCls = 0;
-    for (let c = 4; c < numOut; c++) {
-      const s = data[c * numDets + i];
-      if (s > maxScore) { maxScore = s; maxCls = c - 4; }
+    for (let c = 0; c < numCls; c++) {
+      const s = data[(c + 4) * numBoxes + i];
+      if (s > maxScore) { maxScore = s; maxCls = c; }
     }
-    if (maxScore < threshold) continue;
+    if (maxScore <= threshold) continue;
 
-    const cx = data[0 * numDets + i];
-    const cy = data[1 * numDets + i];
-    const bw = data[2 * numDets + i];
-    const bh = data[3 * numDets + i];
+    const cx = data[i];
+    const cy = data[numBoxes + i];
+    const bw = data[2 * numBoxes + i];
+    const bh = data[3 * numBoxes + i];
+
+    if (!(bw > 0 && bh > 0)) continue;
 
     let x1 = (cx - bw / 2 - dx) / scale;
     let y1 = (cy - bh / 2 - dy) / scale;
@@ -97,6 +113,8 @@ export async function detect(source, threshold = 0.4) {
     y1 = Math.max(0, y1);
     x2 = Math.min(vw, x2);
     y2 = Math.min(vh, y2);
+
+    if (x2 <= x1 || y2 <= y1) continue;
 
     raw.push({
       classId: maxCls,

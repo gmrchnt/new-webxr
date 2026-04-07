@@ -458,8 +458,11 @@ $btnStartAR.addEventListener('click', async () => {
     frames = 0;
     fpsTimes = [];
 
-    // XR render loop
+    // XR render loop (stays fast — no inference here)
     session.requestAnimationFrame(xrLoop);
+
+    // Decoupled inference loop (runs every INFER_INTERVAL ms)
+    inferenceLoop();
 
     session.addEventListener('end', () => {
       arActive = false;
@@ -489,12 +492,13 @@ $btnStopAR.addEventListener('click', async () => {
 let inferring = false;
 let cameraStream = null;
 let cameraVideo = null;
+let lastDets = [];           // persist bounding boxes between inference runs
+let inferLoopId = null;      // setTimeout id for decoupled inference
+const INFER_INTERVAL = 300;  // ms between inference runs (~3 fps detection)
 
 /**
  * Start a parallel camera stream for YOLO inference.
- * WebXR owns the AR camera — we can't read its pixels reliably.
- * Instead we open a second getUserMedia stream and run YOLO on that.
- * The bounding boxes are drawn on the pointCanvas overlay.
+ * Low resolution to minimize preprocessing cost.
  */
 async function startCameraStream() {
   if (cameraVideo) return;
@@ -508,7 +512,7 @@ async function startCameraStream() {
 
   try {
     cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
+      video: { facingMode: 'environment', width: { ideal: 320 }, height: { ideal: 240 } },
     });
     cameraVideo.srcObject = cameraStream;
     await cameraVideo.play();
@@ -519,6 +523,7 @@ async function startCameraStream() {
 }
 
 function stopCameraStream() {
+  if (inferLoopId) { clearTimeout(inferLoopId); inferLoopId = null; }
   if (cameraStream) {
     cameraStream.getTracks().forEach(t => t.stop());
     cameraStream = null;
@@ -527,8 +532,56 @@ function stopCameraStream() {
     cameraVideo.remove();
     cameraVideo = null;
   }
+  lastDets = [];
 }
 
+/**
+ * Decoupled inference loop — runs independently from XR at INFER_INTERVAL.
+ * This prevents YOLO from blocking the AR render loop.
+ */
+async function inferenceLoop() {
+  if (!arActive || currentMode !== 'auto' || !isModelLoaded()) {
+    inferLoopId = setTimeout(inferenceLoop, INFER_INTERVAL);
+    return;
+  }
+
+  if (!cameraVideo) await startCameraStream();
+  if (!cameraVideo || cameraVideo.readyState < 2) {
+    inferLoopId = setTimeout(inferenceLoop, INFER_INTERVAL);
+    return;
+  }
+
+  try {
+    const vw = cameraVideo.videoWidth;
+    const vh = cameraVideo.videoHeight;
+
+    const t0 = performance.now();
+    const dets = await detect(cameraVideo, threshold);
+    const ms = (performance.now() - t0).toFixed(1);
+
+    lastDets = dets;
+
+    document.getElementById('sDet').textContent = dets.length;
+    document.getElementById('sInf').textContent = ms;
+
+    $autoStatus.textContent = dets.length
+      ? `${dets.length} damage${dets.length > 1 ? 's' : ''} detected`
+      : 'Scanning…';
+
+    // Measure and log new detections via WebXR hit-test
+    if (dets.length > 0 && currentFrame && currentRefSpace) {
+      await processAutoDetections(dets, vw, vh);
+    }
+  } catch (e) {
+    console.warn('Inference error:', e);
+  }
+
+  inferLoopId = setTimeout(inferenceLoop, INFER_INTERVAL);
+}
+
+/**
+ * XR frame loop — stays fast, only draws bounding boxes from last inference.
+ */
 async function xrLoop(timestamp, frame) {
   const session = getSession();
   if (!session || !arActive) return;
@@ -550,41 +603,11 @@ async function xrLoop(timestamp, frame) {
   fpsTimes = fpsTimes.filter(t => now - t < 1000);
   document.getElementById('arFps').textContent = fpsTimes.length;
 
-  // Mode 2: run YOLO on the parallel camera stream
-  if (currentMode === 'auto' && isModelLoaded() && !inferring) {
-    // Ensure camera stream is running
-    if (!cameraVideo) await startCameraStream();
-    if (!cameraVideo || cameraVideo.readyState < 2) return;
-
-    inferring = true;
-
-    try {
-      const vw = cameraVideo.videoWidth;
-      const vh = cameraVideo.videoHeight;
-
-      const t0 = performance.now();
-      const dets = await detect(cameraVideo, threshold);
-      const ms = (performance.now() - t0).toFixed(1);
-
-      document.getElementById('sDet').textContent = dets.length;
-      document.getElementById('sInf').textContent = ms;
-
-      $autoStatus.textContent = dets.length
-        ? `${dets.length} damage${dets.length > 1 ? 's' : ''} detected`
-        : 'Scanning…';
-
-      // Draw bounding boxes on the pointCanvas overlay
-      drawAutoDetections(dets, vw, vh);
-
-      // Measure and log new detections
-      if (dets.length > 0) {
-        await processAutoDetections(dets, vw, vh);
-      }
-    } catch (e) {
-      console.warn('Auto detection error:', e);
-    }
-
-    inferring = false;
+  // Draw last detections every frame (cheap — just canvas 2D)
+  if (currentMode === 'auto' && lastDets.length > 0 && cameraVideo) {
+    drawAutoDetections(lastDets, cameraVideo.videoWidth, cameraVideo.videoHeight);
+  } else if (currentMode === 'auto' && lastDets.length === 0) {
+    clearPointCanvas();
   }
 }
 
