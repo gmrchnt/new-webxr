@@ -3,7 +3,7 @@ import { loadModel, detect, isModelLoaded } from './detector.js';
 import { getColor, CLASS_NAMES } from './classes.js';
 import {
   startARSession, endARSession, getSession, getRefSpace,
-  onXRFrame, hitTestAtPoint, measureBBox,
+  onXRFrame, hitTestAtPoint, measureBBox, captureFrame,
   getCenterHitTest, dist3D, formatDistance, isARSupported,
   projectToScreen,
 } from './ar.js';
@@ -156,7 +156,6 @@ let pt1 = null, pt2 = null, manualLen = null;
 // Auto
 let lastDets = [];
 let inferLoopId = null;
-let cameraStream = null, cameraVideo = null;
 const INFER_INTERVAL = 300;
 
 // ══════════════════════════════════════════════════
@@ -445,59 +444,44 @@ async function processDetections(dets, camW, camH) {
   }
 }
 
-// ── Camera for YOLO ──
-async function startCamera() {
-  if (cameraVideo) return;
-  cameraVideo = document.createElement('video');
-  cameraVideo.setAttribute('playsinline', ''); cameraVideo.setAttribute('autoplay', '');
-  cameraVideo.muted = true; cameraVideo.style.display = 'none';
-  document.body.appendChild(cameraVideo);
-  try {
-    cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 320 }, height: { ideal: 240 } },
-    });
-    cameraVideo.srcObject = cameraStream;
-    await cameraVideo.play();
-  } catch (e) { console.warn('Camera failed:', e); cameraVideo = null; }
-}
+// ── No parallel camera — capture directly from XR framebuffer ──
+let lastDetSource = { w: 640, h: 480 };
 
 function stopCamera() {
   if (inferLoopId) { clearTimeout(inferLoopId); inferLoopId = null; }
-  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
-  if (cameraVideo) { cameraVideo.remove(); cameraVideo = null; }
   lastDets = [];
   detTracker.clear();
 }
 
 /**
  * Decoupled inference loop.
- * Each cycle: run YOLO → update lastDets → process for stability/logging.
- * If YOLO returns 0 detections, lastDets becomes empty → boxes vanish.
+ * Captures the AR camera view from the XR framebuffer,
+ * runs YOLO on it, updates detections.
  */
 async function inferLoop() {
   if (!arActive || currentMode !== 'auto' || !isModelLoaded()) {
-    // When not in auto mode, clear detections
     if (currentMode !== 'auto') { lastDets = []; detTracker.clear(); }
     inferLoopId = setTimeout(inferLoop, INFER_INTERVAL); return;
   }
-  if (!cameraVideo) await startCamera();
-  if (!cameraVideo || cameraVideo.readyState < 2) {
+
+  // Capture current AR view from framebuffer
+  const captured = captureFrame(currentFrame, currentRefSpace);
+  if (!captured) {
     inferLoopId = setTimeout(inferLoop, INFER_INTERVAL); return;
   }
 
   try {
-    const vw = cameraVideo.videoWidth, vh = cameraVideo.videoHeight;
-    const dets = await detect(cameraVideo, threshold);
+    const { canvas, width, height } = captured;
+    const dets = await detect(canvas, threshold);
 
-    // THIS is the key: completely replace lastDets every cycle
     lastDets = dets;
+    lastDetSource = { w: width, h: height };
 
     $autoInstr.textContent = dets.length
       ? `${dets.length} damage${dets.length > 1 ? 's' : ''} detected`
       : 'Scanning for damage…';
 
-    // Process for stability tracking and auto-logging
-    await processDetections(dets, vw, vh);
+    await processDetections(dets, width, height);
   } catch (e) { console.warn('Infer error:', e); }
 
   inferLoopId = setTimeout(inferLoop, INFER_INTERVAL);
@@ -636,10 +620,9 @@ function xrLoop(ts, frame) {
 
   // Draw based on mode
   if (currentMode === 'manual' && (pt1 || pt2)) {
-    // Re-project 3D points to screen every frame — points stick to surface
     drawManual();
-  } else if (currentMode === 'auto' && cameraVideo && lastDets.length > 0) {
-    drawAuto(lastDets, cameraVideo.videoWidth, cameraVideo.videoHeight);
+  } else if (currentMode === 'auto' && lastDets.length > 0) {
+    drawAuto(lastDets, lastDetSource.w, lastDetSource.h);
   } else {
     clearCanvas();
   }
