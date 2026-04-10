@@ -3,7 +3,11 @@ import { CLASS_NAMES } from './classes.js';
 
 // ── WASM config ──
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.0/dist/';
-ort.env.wasm.numThreads = 1;
+
+// Auto-detect multi-threading: requires SharedArrayBuffer (needs COOP/COEP headers)
+const canMultiThread = typeof SharedArrayBuffer !== 'undefined';
+ort.env.wasm.numThreads = canMultiThread ? (navigator.hardwareConcurrency || 4) : 1;
+console.log(`[YOLO] WASM threads: ${ort.env.wasm.numThreads} (SharedArrayBuffer: ${canMultiThread})`);
 
 const INPUT_SIZE = 640;
 let session = null;
@@ -22,11 +26,34 @@ function ensureBuffers() {
   }
 }
 
+const MODEL_CACHE = 'yolo-model-v1';
+
 /**
- * Load YOLOv8n ONNX model.
+ * Fetch model with Cache API — downloads once, loads from cache after that.
+ */
+async function cachedFetch(url) {
+  try {
+    const cache = await caches.open(MODEL_CACHE);
+    const cached = await cache.match(url);
+    if (cached) return cached.arrayBuffer();
+
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);
+    cache.put(url, resp.clone());
+    return resp.arrayBuffer();
+  } catch {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);
+    return resp.arrayBuffer();
+  }
+}
+
+/**
+ * Load YOLOv8n ONNX model (cached after first download).
  */
 export async function loadModel(url) {
-  session = await ort.InferenceSession.create(url, {
+  const buf = await cachedFetch(url);
+  session = await ort.InferenceSession.create(buf, {
     executionProviders: ['wasm'],
     graphOptimizationLevel: 'all',
   });
