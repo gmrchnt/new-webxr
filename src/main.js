@@ -57,18 +57,6 @@ document.getElementById('app').innerHTML = `
     </section>
 
     <aside class="sidebar">
-      <div class="panel">
-        <div class="panel-head">Performance</div>
-        <div class="panel-body">
-          <div class="stats-grid">
-            <div class="stat"><div class="stat-val" id="sDet">0</div><div class="stat-lbl">Detections</div></div>
-            <div class="stat"><div class="stat-val" id="sInf">—</div><div class="stat-lbl">Infer (ms)</div></div>
-            <div class="stat"><div class="stat-val" id="sFrm">0</div><div class="stat-lbl">Frames</div></div>
-            <div class="stat"><div class="stat-val" id="sAvg">—</div><div class="stat-lbl">Avg Conf</div></div>
-          </div>
-        </div>
-      </div>
-
       <div class="panel grow">
         <div class="panel-head">Live Detections <span class="count" id="detCount">0</span></div>
         <div class="det-scroll" id="detScroll">
@@ -100,17 +88,6 @@ document.getElementById('app').innerHTML = `
           <button class="log-clear-btn" id="btnCloseEstimate">✕</button>
         </div>
         <div class="panel-body" id="estimateBody"></div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">Model</div>
-        <div class="panel-body info-rows">
-          <div class="row"><span>Architecture</span><span class="v">YOLOv8n</span></div>
-          <div class="row"><span>Format</span><span class="v">ONNX</span></div>
-          <div class="row"><span>Input</span><span class="v">640 × 640 × 3</span></div>
-          <div class="row"><span>Backend</span><span class="v">WASM</span></div>
-          <div class="row"><span>Status</span><span class="v" id="iStatus">Not loaded</span></div>
-        </div>
       </div>
     </aside>
   </main>
@@ -146,11 +123,9 @@ let currentDets = [];
   $('loadingLabel').textContent = 'Loading YOLOv8n damage model…';
   try {
     await loadModel('/best.onnx');
-    $('iStatus').textContent = 'Ready';
     toast('Model loaded');
   } catch (err) {
     console.error(err);
-    $('iStatus').textContent = 'Error';
     toast('Model load failed: ' + err.message, true);
   }
   $('loadingScreen').classList.add('hidden');
@@ -509,10 +484,6 @@ function showSummary() {
 //  Live detections UI
 // ══════════════════════════════════════════════════
 function updateUI(dets, ms) {
-  $('sDet').textContent = dets.length;
-  $('sInf').textContent = ms;
-  $('sFrm').textContent = frames;
-
   const now = performance.now();
 
   for (const d of dets) {
@@ -530,9 +501,6 @@ function updateUI(dets, ms) {
   currentDets = liveDets.sort((a, b) => b.confidence - a.confidence).slice(0, 25);
 
   $('detCount').textContent = currentDets.length;
-  $('sAvg').textContent = currentDets.length
-    ? ((currentDets.reduce((s, d) => s + d.confidence, 0) / currentDets.length) * 100).toFixed(0) + '%'
-    : '—';
 
   const list = $('detList');
   if (!currentDets.length) {
