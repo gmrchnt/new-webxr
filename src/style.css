@@ -121,6 +121,44 @@ html, body {
 .info-rows .row { display:flex; justify-content:space-between; }
 .info-rows .v { color:var(--text); }
 
+/* ── Cost estimate / vendor styles ── */
+.det-cost { font-family:var(--mono); font-size:10px; font-weight:700; color:var(--accent); padding:2px 6px; border-radius:4px; background:var(--accent-dim); }
+
+.log-est { background:none; border:1px solid var(--border); color:var(--accent); cursor:pointer; font-family:var(--mono); font-size:11px; font-weight:700; padding:2px 6px; border-radius:4px; transition:all .15s; }
+.log-est:hover { border-color:var(--accent); background:var(--accent-dim); }
+
+.est-header { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+.est-swatch { width:12px; height:12px; border-radius:3px; flex-shrink:0; }
+.est-type { font-family:var(--mono); font-size:13px; font-weight:700; }
+.est-severity { font-family:var(--mono); font-size:10px; font-weight:600; padding:2px 8px; border-radius:10px; margin-left:auto; }
+.est-severity-minor { background:rgba(0,229,160,.15); color:#00e5a0; }
+.est-severity-moderate { background:rgba(255,165,2,.15); color:var(--warn); }
+.est-severity-significant { background:rgba(255,71,87,.15); color:var(--danger); }
+.est-severity-severe { background:rgba(255,0,0,.2); color:#ff4757; }
+.est-severity-parts { background:rgba(55,66,250,.15); color:#3742fa; }
+.est-severity-summary { background:rgba(0,229,160,.15); color:#00e5a0; }
+
+.est-price { font-family:var(--mono); font-size:28px; font-weight:700; color:var(--text); line-height:1; }
+.est-range { font-family:var(--mono); font-size:12px; color:var(--text2); margin-top:4px; }
+.est-note { font-size:11px; color:var(--text2); margin-top:8px; font-style:italic; }
+
+.est-breakdown { margin-top:14px; display:flex; flex-direction:column; gap:6px; }
+.est-row { display:flex; justify-content:space-between; font-family:var(--mono); font-size:11px; color:var(--text2); padding:4px 0; border-bottom:1px solid var(--border); }
+.est-row span:last-child { color:var(--text); font-weight:600; }
+
+/* Vendor list */
+.vendor-list { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
+.vendor-item { display:flex; align-items:center; gap:10px; padding:10px 12px; background:var(--bg2); border-radius:8px; border:1px solid var(--border); transition:border-color .15s; }
+.vendor-best { border-color:var(--accent); background:rgba(0,229,160,.04); }
+.vendor-rank { font-family:var(--mono); font-size:14px; font-weight:700; color:var(--text2); width:20px; text-align:center; flex-shrink:0; }
+.vendor-best .vendor-rank { color:var(--accent); }
+.vendor-info { flex:1; min-width:0; }
+.vendor-name { font-family:var(--mono); font-size:12px; font-weight:600; }
+.vendor-part { font-size:11px; color:var(--text2); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.vendor-meta { font-size:10px; color:var(--text2); margin-top:3px; }
+.vendor-price { font-family:var(--mono); font-size:16px; font-weight:700; color:var(--accent); flex-shrink:0; }
+.vendor-best .vendor-price { color:var(--accent); }
+
 /* ═══ RESPONSIVE ═══ */
 @media (max-width: 960px) {
   .main-grid { grid-template-columns:1fr; height:auto; }
