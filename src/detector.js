@@ -3,11 +3,7 @@ import { CLASS_NAMES } from './classes.js';
 
 // ── WASM config ──
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.0/dist/';
-
-// Auto-detect multi-threading: requires SharedArrayBuffer (needs COOP/COEP headers)
-const canMultiThread = typeof SharedArrayBuffer !== 'undefined';
-ort.env.wasm.numThreads = canMultiThread ? (navigator.hardwareConcurrency || 4) : 1;
-console.log(`[YOLO] WASM threads: ${ort.env.wasm.numThreads} (SharedArrayBuffer: ${canMultiThread})`);
+ort.env.wasm.numThreads = 1;
 
 const INPUT_SIZE = 640;
 let session = null;
